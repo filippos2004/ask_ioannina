@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,32 +10,36 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ImageBackground,
+  FlatList,
+  ScrollView,
+  Image,
+  SafeAreaView,
+  Linking,
+  Dimensions,
 } from "react-native";
+import MapView, { Marker, Callout } from "react-native-maps";
 
 /**
- * ✅ Βάλε σωστό base URL:
+ * ✅ Βάλε σωστό base URL για το API σου:
  * - Android Emulator: http://10.0.2.2:8000
- * - iOS Simulator:   http://localhost:8000
- * - Πραγματική συσκευή: http://<IP_υπολογιστή_σου>:8000
+ * - iOS Simulator:    http://localhost:8000
+ * - ΠΡΑΓΜΑΤΙΚΟ ΚΙΝΗΤΟ: http://<IP_του_PC_σου>:8000   (π.χ. http://192.168.1.8:8000)
  */
-const API_BASE_URL =
-    Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://localhost:8000";
+const API_BASE_URL= "http://192.168.1.3:8000"
+const SCREEN_W = Dimensions.get("window").width;
 
-async function apiPost(path, body) {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
+/** -----------------------------
+ *  Small API helper w/ refresh
+ *  ----------------------------- */
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
   const text = await res.text();
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    data = text || null;
+    data = text;
   }
-
   if (!res.ok) {
     const msg =
         (data && (data.detail || data.message)) ||
@@ -45,331 +49,668 @@ async function apiPost(path, body) {
     err.status = res.status;
     throw err;
   }
-
   return data;
 }
 
-export default function App() {
-  const [screen, setScreen] = useState("login"); // "login" | "signup"
-  const [accessToken, setAccessToken] = useState(null);
-  const [refreshToken, setRefreshToken] = useState(null);
+function useApi() {
+  const [tokens, setTokens] = useState(null); // {accessToken, refreshToken}
 
-  const onLoggedIn = (tokens) => {
-    setAccessToken(tokens?.accessToken || null);
-    setRefreshToken(tokens?.refreshToken || null);
-    Alert.alert("OK", "Σύνδεση επιτυχής ✅");
+  const authedFetch = async (path, { method = "GET", body, headers = {} } = {}) => {
+    const doReq = async (accessToken) => {
+      const h = {
+        "Content-Type": "application/json",
+        ...headers,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      };
+      return fetchJson(`${API_BASE_URL}${path}`, {
+        method,
+        headers: h,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    };
+
+    try {
+      return await doReq(tokens?.accessToken);
+    } catch (e) {
+      // auto refresh on 401
+      if (e.status === 401 && tokens?.refreshToken) {
+        const refreshed = await fetchJson(`${API_BASE_URL}/api/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+        });
+        setTokens(refreshed);
+        return await doReq(refreshed.accessToken);
+      }
+      throw e;
+    }
   };
 
-  const onSignedUp = (tokens) => {
-    setAccessToken(tokens?.accessToken || null);
-    setRefreshToken(tokens?.refreshToken || null);
-    Alert.alert("OK", "Εγγραφή επιτυχής ✅ (έγινε και login)");
-    setScreen("login");
+  return { tokens, setTokens, authedFetch };
+}
+
+/** -----------------------------
+ *  App Screens (no navigation lib)
+ *  ----------------------------- */
+export default function App() {
+  const { tokens, setTokens, authedFetch } = useApi();
+
+  // "screens": login → signup → categories → categoryMap → poiDetails
+  const [route, setRoute] = useState({ name: "login", params: {} });
+
+  const go = (name, params = {}) => setRoute({ name, params });
+  const logout = () => {
+    setTokens(null);
+    go("login");
   };
 
   return (
-      <ImageBackground
-          source={require("./assets/images5.png")}
-          resizeMode="contain"
-          style={styles.safe}
-      >
-        <KeyboardAvoidingView
-            style={styles.headcont}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <View style={styles.appheader}>
-            <Text style={styles.appTitle}>IOANNINA_LOVERS</Text>
-          </View>
-        </KeyboardAvoidingView>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#0b1523" }}>
+        {route.name === "login" && (
+            <LoginScreen
+                onLogin={(t) => {
+                  setTokens(t);
+                  go("categories");
+                }}
+                goSignup={() => go("signup")}
+            />
+        )}
 
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          {screen === "login" ? (
-              <LoginCard
-                  onLogin={onLoggedIn}
-                  goSignup={() => setScreen("signup")}
-              />
-          ) : (
-              <SignupCard
-                  onSignup={onSignedUp}
-                  goLogin={() => setScreen("login")}
-              />
-          )}
+        {route.name === "signup" && (
+            <SignupScreen
+                onSignup={() => {
+                  Alert.alert("Έτοιμο!", "Ο λογαριασμός δημιουργήθηκε. Κάνε σύνδεση.");
+                  go("login");
+                }}
+                goLogin={() => go("login")}
+            />
+        )}
 
-          {/* μικρό debug (προαιρετικό) */}
-          {!!accessToken && (
-              <View style={styles.tokenBox}>
-                <Text style={styles.tokenTitle}>Token (για POIs endpoints)</Text>
-                <Text style={styles.tokenText} numberOfLines={2}>
-                  {accessToken}
-                </Text>
-              </View>
-          )}
-        </KeyboardAvoidingView>
-      </ImageBackground>
+        {route.name === "categories" && (
+            <CategoriesScreen
+                authedFetch={authedFetch}
+                onOpenCategory={(category) => go("categoryMap", { category })}
+                onLogout={logout}
+            />
+        )}
+
+        {route.name === "categoryMap" && (
+            <CategoryMapScreen
+                authedFetch={authedFetch}
+                category={route.params.category}
+                onBack={() => go("categories")}
+                onOpenPoi={(poi) => go("poiDetails", { poiId: poi.id })}
+            />
+        )}
+
+        {route.name === "poiDetails" && (
+            <PoiDetailsScreen
+                authedFetch={authedFetch}
+                poiId={route.params.poiId}
+                onBack={() => go("categoryMap", route.params)}
+            />
+        )}
+      </SafeAreaView>
   );
 }
 
-function LoginCard({ onLogin, goSignup }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  const [showPass, setShowPass] = useState(false);
+/** -----------------------------
+ *  LOGIN
+ *  ----------------------------- */
+function LoginScreen({ onLogin, goSignup }) {
+  const [email, setEmail] = useState("demo@demo.com");
+  const [password, setPassword] = useState("demo1234");
   const [loading, setLoading] = useState(false);
+
+  // show /about (optional but recommended in the assignment)
+  const [about, setAbout] = useState([]);
+  useEffect(() => {
+    fetchJson(`${API_BASE_URL}/about`)
+        .then(setAbout)
+        .catch(() => {});
+  }, []);
 
   const emailOk = useMemo(() => /^\S+@\S+\.\S+$/.test(email.trim()), [email]);
   const passOk = useMemo(() => password.length >= 6, [password]);
-  const canSubmit = emailOk && passOk && !loading;
 
-  const handleLogin = async () => {
-    const e = email.trim().toLowerCase();
-
-    if (!emailOk) return Alert.alert("Σφάλμα", "Βάλε έγκυρο email.");
-    if (!passOk) return Alert.alert("Σφάλμα", "Ο κωδικός πρέπει να έχει ≥ 6 χαρακτήρες.");
-
-    setLoading(true);
+  const doLogin = async () => {
     try {
-      const tokens = await apiPost("/api/auth/login", { email: e, password });
-      onLogin(tokens);
-    } catch (err) {
-      Alert.alert("Αποτυχία", err.message || "Κάτι πήγε λάθος.");
+      setLoading(true);
+      const data = await fetchJson(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      onLogin(data);
+    } catch (e) {
+      Alert.alert("Login απέτυχε", e.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-      <View style={styles.card}>
-        <Text style={styles.title}>Login</Text>
-        <Text style={styles.subtitle}>Σύνδεση στον λογαριασμό σου</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="π.χ. demo@demo.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[styles.input, email.length > 0 && !emailOk ? styles.inputError : null]}
-        />
-        {email.length > 0 && !emailOk && <Text style={styles.helperError}>Μη έγκυρο email</Text>}
-
-        <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
-        <View style={styles.passRow}>
-          <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="τουλάχιστον 6 χαρακτήρες"
-              secureTextEntry={!showPass}
-              autoCapitalize="none"
-              style={[styles.input, styles.passInput, password.length > 0 && !passOk ? styles.inputError : null]}
-          />
-          <TouchableOpacity
-              onPress={() => setShowPass((s) => !s)}
-              style={styles.showBtn}
-              accessibilityRole="button"
-          >
-            <Text style={styles.showBtnText}>{showPass ? "Hide" : "Show"}</Text>
-          </TouchableOpacity>
-        </View>
-        {password.length > 0 && !passOk && <Text style={styles.helperError}>Πολύ μικρός κωδικός</Text>}
-
-        <TouchableOpacity
-            onPress={handleLogin}
-            disabled={!canSubmit}
-            style={[styles.loginBtn, !canSubmit ? styles.loginBtnDisabled : null]}
-            accessibilityRole="button"
+      <ImageBackground
+          source={require("./assets/splash-icon.png")}
+          style={styles.bg}
+          resizeMode="cover"
+      >
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.centerWrap}
         >
-          {loading ? <ActivityIndicator /> : <Text style={styles.loginBtnText}>Σύνδεση</Text>}
-        </TouchableOpacity>
+          <View style={styles.card}>
+            <Text style={styles.title}>Ioannina Explorer</Text>
+            <Text style={styles.subtitle}>Σύνδεση</Text>
 
-        <TouchableOpacity
-            onPress={() =>
-                Alert.alert(
-                    "Tip",
-                    "Το API που έχεις είναι demo και έχει default χρήστη: demo@demo.com / demo1234 (εκτός αν κάνεις εγγραφή)."
-                )
-            }
-            style={styles.linkBtn}
-            accessibilityRole="button"
-        >
-          <Text style={styles.linkText}>Ξέχασες τον κωδικό;</Text>
-        </TouchableOpacity>
+            <TextInput
+                style={styles.input}
+                placeholder="Email"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+            />
+            <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+            />
 
-        <TouchableOpacity onPress={goSignup} style={styles.linkBtn} accessibilityRole="button">
-          <Text style={styles.linkText}>Δεν έχεις λογαριασμό; Φτιάξε έναν</Text>
-        </TouchableOpacity>
-      </View>
+            <TouchableOpacity
+                style={[styles.btn, (!emailOk || !passOk || loading) && styles.btnDisabled]}
+                disabled={!emailOk || !passOk || loading}
+                onPress={doLogin}
+            >
+              {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Sign In</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.linkBtn} onPress={goSignup}>
+              <Text style={styles.linkText}>Δεν έχεις λογαριασμό; Φτιάξε έναν</Text>
+            </TouchableOpacity>
+
+            {about?.length > 0 && (
+                <View style={styles.aboutBox}>
+                  <Text style={styles.aboutTitle}>Ομάδα</Text>
+                  {about.map((m, idx) => (
+                      <Text key={idx} style={styles.aboutLine}>
+                        • {m.name} ({m.am})
+                      </Text>
+                  ))}
+                </View>
+            )}
+
+            <Text style={styles.hint}>
+              Tip: Αν είσαι σε κινητό, άλλαξε το API_BASE_URL στο πάνω μέρος.
+            </Text>
+          </View>
+        </KeyboardAvoidingView>
+      </ImageBackground>
   );
 }
 
-function SignupCard({ onSignup, goLogin }) {
+/** -----------------------------
+ *  SIGNUP
+ *  ----------------------------- */
+function SignupScreen({ onSignup, goLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
-
-  const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const emailOk = useMemo(() => /^\S+@\S+\.\S+$/.test(email.trim()), [email]);
   const passOk = useMemo(() => password.length >= 6, [password]);
   const matchOk = useMemo(() => password2.length > 0 && password2 === password, [password2, password]);
 
-  const canSubmit = emailOk && passOk && matchOk && !loading;
-
-  const handleSignup = async () => {
-    const e = email.trim().toLowerCase();
-
-    if (!emailOk) return Alert.alert("Σφάλμα", "Βάλε έγκυρο email.");
-    if (!passOk) return Alert.alert("Σφάλμα", "Ο κωδικός πρέπει να έχει ≥ 6 χαρακτήρες.");
-    if (!matchOk) return Alert.alert("Σφάλμα", "Οι κωδικοί δεν ταιριάζουν.");
-
-    setLoading(true);
+  const doSignup = async () => {
     try {
-      const tokens = await apiPost("/api/auth/signup", { email: e, password });
-      onSignup(tokens);
-    } catch (err) {
-      if (err.status === 409) {
-        Alert.alert("Υπάρχει ήδη", "Υπάρχει ήδη λογαριασμός με αυτό το email.");
-      } else {
-        Alert.alert("Αποτυχία", err.message || "Κάτι πήγε λάθος.");
-      }
+      setLoading(true);
+      await fetchJson(`${API_BASE_URL}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      onSignup();
+    } catch (e) {
+      Alert.alert("Signup απέτυχε", e.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-      <View style={styles.card}>
-        <Text style={styles.title}>Sign Up</Text>
-        <Text style={styles.subtitle}>Φτιάξε νέο λογαριασμό</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="π.χ. you@email.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[styles.input, email.length > 0 && !emailOk ? styles.inputError : null]}
-        />
-        {email.length > 0 && !emailOk && <Text style={styles.helperError}>Μη έγκυρο email</Text>}
-
-        <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
-        <View style={styles.passRow}>
-          <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="τουλάχιστον 6 χαρακτήρες"
-              secureTextEntry={!showPass}
-              autoCapitalize="none"
-              style={[styles.input, styles.passInput, password.length > 0 && !passOk ? styles.inputError : null]}
-          />
-          <TouchableOpacity
-              onPress={() => setShowPass((s) => !s)}
-              style={styles.showBtn}
-              accessibilityRole="button"
-          >
-            <Text style={styles.showBtnText}>{showPass ? "Hide" : "Show"}</Text>
-          </TouchableOpacity>
-        </View>
-        {password.length > 0 && !passOk && <Text style={styles.helperError}>Πολύ μικρός κωδικός</Text>}
-
-        <Text style={[styles.label, { marginTop: 12 }]}>Confirm Password</Text>
-        <TextInput
-            value={password2}
-            onChangeText={setPassword2}
-            placeholder="ξανά τον κωδικό"
-            secureTextEntry={!showPass}
-            autoCapitalize="none"
-            style={[styles.input, password2.length > 0 && !matchOk ? styles.inputError : null]}
-        />
-        {password2.length > 0 && !matchOk && <Text style={styles.helperError}>Δεν ταιριάζουν οι κωδικοί</Text>}
-
-        <TouchableOpacity
-            onPress={handleSignup}
-            disabled={!canSubmit}
-            style={[styles.loginBtn, !canSubmit ? styles.loginBtnDisabled : null]}
-            accessibilityRole="button"
+      <ImageBackground
+          source={require("./assets/splash-icon.png")}
+          style={styles.bg}
+          resizeMode="cover"
+      >
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.centerWrap}
         >
-          {loading ? <ActivityIndicator /> : <Text style={styles.loginBtnText}>Εγγραφή</Text>}
+          <View style={styles.card}>
+            <Text style={styles.title}>Ioannina Explorer</Text>
+            <Text style={styles.subtitle}>Δημιουργία λογαριασμού</Text>
+
+            <TextInput
+                style={styles.input}
+                placeholder="Email"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+            />
+            <TextInput
+                style={styles.input}
+                placeholder="Password (min 6)"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+            />
+            <TextInput
+                style={styles.input}
+                placeholder="Repeat password"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={password2}
+                onChangeText={setPassword2}
+                secureTextEntry
+            />
+
+            <TouchableOpacity
+                style={[styles.btn, (!emailOk || !passOk || !matchOk || loading) && styles.btnDisabled]}
+                disabled={!emailOk || !passOk || !matchOk || loading}
+                onPress={doSignup}
+            >
+              {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Create Account</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.linkBtn} onPress={goLogin}>
+              <Text style={styles.linkText}>Έχεις ήδη λογαριασμό; Σύνδεση</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </ImageBackground>
+  );
+}
+
+/** -----------------------------
+ *  CATEGORIES SCREEN (/pois/categories)
+ *  ----------------------------- */
+function CategoriesScreen({ authedFetch, onOpenCategory, onLogout }) {
+  const [loading, setLoading] = useState(true);
+  const [cats, setCats] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await authedFetch("/pois/categories");
+        if (mounted) setCats(data || []);
+      } catch (e) {
+        Alert.alert("Σφάλμα", e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => (mounted = false);
+  }, [authedFetch]);
+
+  return (
+      <View style={styles.screen}>
+        <Header title="Κατηγορίες POIs (Ιωάννινα)" rightText="Logout" onRightPress={onLogout} />
+        {loading ? (
+            <View style={styles.center}>
+              <ActivityIndicator />
+              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
+            </View>
+        ) : (
+            <FlatList
+                data={cats}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+                renderItem={({ item }) => (
+                    <TouchableOpacity style={styles.catCard} onPress={() => onOpenCategory(item)}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.catTitle}>{item.name}</Text>
+                        <Text style={styles.catSub}>{item.count} σημεία ενδιαφέροντος</Text>
+                      </View>
+                      <Text style={styles.catArrow}>›</Text>
+                    </TouchableOpacity>
+                )}
+            />
+        )}
+        <Text style={styles.footerNote}>
+          ⚠️ Για χάρτη: τρέξε{" "}
+          <Text style={{ fontWeight: "800" }}>npx expo install react-native-maps</Text>
+        </Text>
+      </View>
+  );
+}
+
+/** -----------------------------
+ *  CATEGORY MAP SCREEN (/pois/categories/{id})
+ *  Full-screen map + pins + tooltip preview
+ *  ----------------------------- */
+function CategoryMapScreen({ authedFetch, category, onBack, onOpenPoi }) {
+  const [loading, setLoading] = useState(true);
+  const [pois, setPois] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await authedFetch(`/pois/categories/${category.id}`);
+        if (mounted) setPois(data || []);
+      } catch (e) {
+        Alert.alert("Σφάλμα", e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => (mounted = false);
+  }, [authedFetch, category?.id]);
+
+  const region = useMemo(() => {
+    const withCoords = (pois || []).filter((p) => typeof p.lat === "number" && typeof p.lon === "number");
+    if (withCoords.length === 0) {
+      // Ioannina center fallback
+      return { latitude: 39.665, longitude: 20.853, latitudeDelta: 0.18, longitudeDelta: 0.18 };
+    }
+    const lats = withCoords.map((p) => p.lat);
+    const lons = withCoords.map((p) => p.lon);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const latitude = (minLat + maxLat) / 2;
+    const longitude = (minLon + maxLon) / 2;
+    const latitudeDelta = Math.max(0.05, (maxLat - minLat) * 1.6);
+    const longitudeDelta = Math.max(0.05, (maxLon - minLon) * 1.6);
+    return { latitude, longitude, latitudeDelta, longitudeDelta };
+  }, [pois]);
+
+  return (
+      <View style={styles.screen}>
+        <Header title={category?.name || "Κατηγορία"} leftText="‹ Back" onLeftPress={onBack} />
+        {loading ? (
+            <View style={styles.center}>
+              <ActivityIndicator />
+              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση POIs...</Text>
+            </View>
+        ) : (
+            <MapView style={{ flex: 1 }} initialRegion={region}>
+              {(pois || [])
+                  .filter((p) => typeof p.lat === "number" && typeof p.lon === "number")
+                  .map((p) => (
+                      <Marker key={p.id} coordinate={{ latitude: p.lat, longitude: p.lon }}>
+                        <Callout onPress={() => onOpenPoi(p)}>
+                          <View style={{ width: 220 }}>
+                            <Text style={{ fontWeight: "800", marginBottom: 4 }}>{p.title || p.id}</Text>
+                            {p.description ? (
+                                <Text numberOfLines={3} style={{ color: "#333" }}>
+                                  {p.description}
+                                </Text>
+                            ) : null}
+                            <Text style={{ marginTop: 8, color: "#1d4ed8", fontWeight: "700" }}>
+                              Άνοιγμα λεπτομερειών →
+                            </Text>
+                          </View>
+                        </Callout>
+                      </Marker>
+                  ))}
+            </MapView>
+        )}
+      </View>
+  );
+}
+
+/** -----------------------------
+ *  POI DETAILS SCREEN (/pois/{id})
+ *  Slider >=3 photos + tag + coords + wikipedia link + extra text
+ *  ----------------------------- */
+function PoiDetailsScreen({ authedFetch, poiId, onBack }) {
+  const [loading, setLoading] = useState(true);
+  const [poi, setPoi] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await authedFetch(`/pois/${poiId}`);
+        if (mounted) setPoi(data);
+      } catch (e) {
+        Alert.alert("Σφάλμα", e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => (mounted = false);
+  }, [authedFetch, poiId]);
+
+  const images = useMemo(() => {
+    const list = [];
+    if (poi?.image) list.push(poi.image);
+    if (Array.isArray(poi?.images)) list.push(...poi.images);
+    // unique + keep first 6
+    return Array.from(new Set(list)).slice(0, 6);
+  }, [poi]);
+
+  const openWikipedia = async () => {
+    if (!poi?.wikipediaUrl) return;
+    const ok = await Linking.canOpenURL(poi.wikipediaUrl);
+    if (ok) Linking.openURL(poi.wikipediaUrl);
+  };
+
+  return (
+      <View style={styles.screen}>
+        <Header title="Λεπτομέρειες POI" leftText="‹ Back" onLeftPress={onBack} />
+        {loading ? (
+            <View style={styles.center}>
+              <ActivityIndicator />
+              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
+            </View>
+        ) : !poi ? (
+            <View style={styles.center}>
+              <Text style={{ color: "white" }}>Δεν βρέθηκε POI.</Text>
+            </View>
+        ) : (
+            <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.slider}>
+                {(images.length >= 3 ? images : [...images, ...images, ...images].slice(0, 3)).map((u, idx) => (
+                    <Image key={idx} source={{ uri: u }} style={styles.slideImg} />
+                ))}
+              </ScrollView>
+
+              <View style={{ padding: 16 }}>
+                {!!poi.categoryName && <Text style={styles.tag}>{poi.categoryName}</Text>}
+                <Text style={styles.poiTitle}>{poi.title || poi.id}</Text>
+                {!!poi.description && <Text style={styles.poiDesc}>{poi.description}</Text>}
+
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaLabel}>Συντεταγμένες:</Text>
+                  <Text style={styles.metaVal}>
+                    {typeof poi.lat === "number" && typeof poi.lon === "number"
+                        ? `${poi.lat.toFixed(6)}, ${poi.lon.toFixed(6)}`
+                        : "—"}
+                  </Text>
+                </View>
+
+                <TouchableOpacity style={[styles.wikiBtn, !poi.wikipediaUrl && { opacity: 0.5 }]} disabled={!poi.wikipediaUrl} onPress={openWikipedia}>
+                  <Text style={styles.wikiText}>Άνοιγμα στη Wikipedia</Text>
+                </TouchableOpacity>
+
+                {!!poi.extraText && (
+                    <View style={styles.longBox}>
+                      <Text style={styles.longTitle}>Περισσότερα</Text>
+                      <Text style={styles.longText}>{poi.extraText}</Text>
+                    </View>
+                )}
+              </View>
+            </ScrollView>
+        )}
+      </View>
+  );
+}
+
+/** -----------------------------
+ *  Shared Header
+ *  ----------------------------- */
+function Header({ title, leftText, onLeftPress, rightText, onRightPress }) {
+  return (
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onLeftPress} disabled={!onLeftPress} style={styles.headerBtn}>
+          <Text style={[styles.headerBtnText, !onLeftPress && { opacity: 0 }]}>{leftText || " "}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={goLogin} style={styles.linkBtn} accessibilityRole="button">
-          <Text style={styles.linkText}>Έχεις ήδη λογαριασμό; Σύνδεση</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
+
+        <TouchableOpacity onPress={onRightPress} disabled={!onRightPress} style={styles.headerBtn}>
+          <Text style={[styles.headerBtnText, !onRightPress && { opacity: 0 }]}>{rightText || " "}</Text>
         </TouchableOpacity>
       </View>
   );
 }
 
+/** -----------------------------
+ *  Styles
+ *  ----------------------------- */
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#131212ff" },
-  headcont: { flex: 1 },
-  container: { flex: 4, justifyContent: "center", padding: 18 },
+  bg: { flex: 1 },
+  centerWrap: { flex: 1, justifyContent: "center", padding: 18 },
   card: {
-    backgroundColor: "#080808ff",
+    backgroundColor: "rgba(0,0,0,0.55)",
     borderRadius: 18,
     padding: 18,
-  },
-  appheader: {
-    backgroundColor: "#131212ff",
-    paddingVertical: 40,
-    alignItems: "center",
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    marginBottom: 10,
-  },
-  appTitle: {
-    color: "white",
-    fontSize: 35,
-    fontWeight: "bold",
-    letterSpacing: 1,
-  },
-  title: { fontSize: 28, fontWeight: "700", color: "white" },
-  subtitle: { color: "#b9c3e6", marginTop: 6, marginBottom: 16 },
-  label: { color: "#cfe0ff", marginBottom: 6 },
-  input: {
-    backgroundColor: "#eaecf1ff",
     borderWidth: 1,
-    borderColor: "#22335c",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: "#111", // ✅ να φαίνεται πάνω σε ανοιχτό background
+    borderColor: "rgba(255,255,255,0.15)",
   },
-  inputError: { borderColor: "#ff6b6b" },
-  helperError: { color: "#ff8c8c", marginTop: 6 },
-  passRow: { flexDirection: "row", alignItems: "center" },
-  passInput: { flex: 1, marginRight: 10 },
-  showBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: "#1b2b52",
-  },
-  showBtnText: { color: "white", fontWeight: "600" },
-  loginBtn: {
-    marginTop: 16,
-    backgroundColor: "#4f7cff",
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  loginBtnDisabled: { opacity: 0.5 },
-  loginBtnText: { color: "white", fontSize: 16, fontWeight: "700" },
-  linkBtn: { marginTop: 10, alignItems: "center" },
-  linkText: { color: "#fdfdfdff", fontWeight: "600" },
+  title: { color: "white", fontSize: 26, fontWeight: "900", marginBottom: 4 },
+  subtitle: { color: "rgba(255,255,255,0.85)", fontSize: 16, marginBottom: 14 },
 
-  tokenBox: {
+  input: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "white",
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  btn: {
+    backgroundColor: "#2563eb",
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  btnDisabled: { opacity: 0.5 },
+  btnText: { color: "white", fontSize: 16, fontWeight: "800" },
+  linkBtn: { marginTop: 12, alignItems: "center" },
+  linkText: { color: "white", fontWeight: "700" },
+
+  aboutBox: {
     marginTop: 14,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
-  tokenTitle: { color: "white", fontWeight: "700", marginBottom: 6 },
-  tokenText: { color: "white", fontSize: 12 },
+  aboutTitle: { color: "white", fontWeight: "900", marginBottom: 6 },
+  aboutLine: { color: "white", opacity: 0.9 },
+
+  hint: { marginTop: 12, color: "rgba(255,255,255,0.75)", fontSize: 12 },
+
+  screen: { flex: 1, backgroundColor: "#0b1523" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+
+  header: {
+    height: 54,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0f1d33",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  headerBtn: { width: 72, paddingVertical: 8 },
+  headerBtnText: { color: "white", fontWeight: "800" },
+  headerTitle: { flex: 1, textAlign: "center", color: "white", fontWeight: "900", fontSize: 15 },
+
+  catCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+  },
+  catTitle: { color: "white", fontSize: 16, fontWeight: "900" },
+  catSub: { color: "rgba(255,255,255,0.75)", marginTop: 4 },
+  catArrow: { color: "white", fontSize: 26, paddingHorizontal: 8, opacity: 0.9 },
+
+  footerNote: {
+    textAlign: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+
+  slider: { width: "100%", height: 240, backgroundColor: "#000" },
+  slideImg: { width: SCREEN_W, height: 240, resizeMode: "cover" },
+
+  tag: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(37,99,235,0.22)",
+    borderColor: "rgba(37,99,235,0.65)",
+    borderWidth: 1,
+    color: "white",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    overflow: "hidden",
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  poiTitle: { color: "white", fontSize: 22, fontWeight: "900", marginBottom: 8 },
+  poiDesc: { color: "rgba(255,255,255,0.82)", lineHeight: 20, marginBottom: 14 },
+
+  metaRow: { flexDirection: "row", marginBottom: 10 },
+  metaLabel: { color: "rgba(255,255,255,0.75)", width: 110 },
+  metaVal: { color: "white", fontWeight: "800" },
+
+  wikiBtn: {
+    marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  wikiText: { color: "white", fontWeight: "900" },
+
+  longBox: {
+    marginTop: 16,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    borderRadius: 16,
+    padding: 14,
+  },
+  longTitle: { color: "white", fontWeight: "900", marginBottom: 6 },
+  longText: { color: "rgba(255,255,255,0.82)", lineHeight: 20 },
 });

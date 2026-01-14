@@ -1,32 +1,36 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from typing import List
-from pydantic import Field
 
 
 class AboutMember(BaseModel):
     name: str
     am: str
 
+
 class LoginRequest(BaseModel):
     email: str
     password: str
+
 
 class SignupRequest(BaseModel):
     email: str
     password: str
 
+
 class TokenResponse(BaseModel):
     accessToken: str
     refreshToken: str
 
+
 class RefreshRequest(BaseModel):
     refreshToken: str
+
 
 class CategoryOut(BaseModel):
     id: str
     name: str
-    count: int
+    count: int = 0
+
 
 class PoiListItem(BaseModel):
     id: str
@@ -38,6 +42,7 @@ class PoiListItem(BaseModel):
     lon: Optional[float] = None
     image: Optional[str] = None  # URL
     wikipediaUrl: Optional[str] = None
+
 
 class PoiDetails(PoiListItem):
     categoryName: Optional[str] = None

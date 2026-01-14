@@ -42,29 +42,23 @@ def _get_wikipedia_link(sitelinks: Dict[str, Any], lang_pref=("elwiki","enwiki")
             lang = "el" if key == "elwiki" else "en"
             return f"https://{lang}.wikipedia.org/wiki/{title}"
     return None
+WIKIDATA_HEADERS = {
+    "User-Agent": "IoanninaExplorer/1.0 (University project; contact: filip.chatziergatis@gmail.com)",
+    "Accept": "application/json",
+}
+async def fetch_wikidata_entity(qid: str):
+    url = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
 
-async def fetch_wikidata_entity(qid: str) -> Dict[str, Any]:
-    now = time.time()
-    if qid in _CACHE:
-        ts, data = _CACHE[qid]
-        if now - ts < TTL_SECONDS:
-            return data
-
-    params = {
-        "action": "wbgetentities",
-        "ids": qid,
-        "format": "json",
-        "languages": "en|el",
-        "origin": "*",
-    }
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(WIKIDATA_ENDPOINT, params=params)
-        r.raise_for_status()
-        data = r.json()
-
-    _CACHE[qid] = (now, data)
-    return data
+    async with httpx.AsyncClient(
+            headers=WIKIDATA_HEADERS,
+            timeout=20.0,
+            follow_redirects=True
+    ) as client:
+        r = await client.get(url)
+        if r.status_code != 200:
+            print(f"Wikidata error {r.status_code} for {qid}")
+            return None
+        return r.json()
 
 def parse_poi_from_wikidata(qid: str, data: Dict[str, Any]) -> Dict[str, Any]:
     entities = data.get("entities", {})
