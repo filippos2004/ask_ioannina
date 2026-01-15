@@ -5,3 +5,4 @@ passlib
 pydantic
 pydantic-settings
 httpx
+email-validator

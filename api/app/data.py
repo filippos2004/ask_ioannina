@@ -1,7 +1,8 @@
 #Team members (/about)
 TEAM_MEMBERS = [
-    {"name": "ΟΝΟΜΑ 1", "am": "AM1"},
-    {"name": "ΟΝΟΜΑ 2", "am": "AM2"},
+    {"name": "...", "inf2022230": "AM1"},
+    {"name": "...", "if2021240": "AM2"},
+
 ]
 
 # 3 categories x 5 POIs για Ιωάννινα (σύμφωνα με εκφώνηση)

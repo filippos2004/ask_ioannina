@@ -1,19 +1,20 @@
-from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr
 
 
 class AboutMember(BaseModel):
     name: str
-    am: str
+    role: str
+    email: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
 class SignupRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -29,7 +30,7 @@ class RefreshRequest(BaseModel):
 class CategoryOut(BaseModel):
     id: str
     name: str
-    count: int = 0
+    count: int
 
 
 class PoiListItem(BaseModel):
@@ -40,12 +41,34 @@ class PoiListItem(BaseModel):
     description: Optional[str] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
-    image: Optional[str] = None  # URL
+    image: Optional[str] = None
     wikipediaUrl: Optional[str] = None
 
 
-class PoiDetails(PoiListItem):
+class FactItem(BaseModel):
+    label: str
+    value: str
+
+
+class PoiDetails(BaseModel):
+    id: str
+    categoryId: str
+    wikidataId: str
     categoryName: Optional[str] = None
-    images: List[str] = Field(default_factory=list)  # >= 3 in UI
+    shortDescription: Optional[str] = None
+
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+    image: Optional[str] = None
+    wikipediaUrl: Optional[str] = None
+
+    images: List[str] = []
     extraText: Optional[str] = None
-    raw: Optional[Dict[str, Any]] = None  # debug/optional
+
+    # ✅ ΝΕΑ: επιστρέφει facts & raw
+    facts: List[FactItem] = []
+    raw: Optional[Dict[str, Any]] = None
