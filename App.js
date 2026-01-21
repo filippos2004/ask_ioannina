@@ -19,13 +19,28 @@ import {
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
 
-/**
- * ✅ Βάλε σωστό base URL για το API σου:
- * - Android Emulator: http://10.0.2.2:8000
- * - iOS Simulator:    http://localhost:8000
- * - ΠΡΑΓΜΑΤΙΚΟ ΚΙΝΗΤΟ: http://<IP_του_PC_σου>:8000   (π.χ. http://192.168.1.8:8000)
- */
-const API_BASE_URL= "http://192.168.1.3:8000"
+import Constants from "expo-constants";
+
+
+function getHost() {
+ 
+  const hostFromExpo =
+    Constants.expoConfig?.hostUri?.split(":")[0] ||
+    Constants.manifest2?.extra?.expoClient?.hostUri?.split(":")[0] ||
+    Constants.manifest?.debuggerHost?.split(":")[0];
+
+  if (hostFromExpo) return hostFromExpo;
+
+  
+  if (Platform.OS === "android") return "10.0.2.2";
+
+  return "localhost";
+}
+
+export const API_BASE_URL = `http://${getHost()}:8000`;
+
+console.log("API_BASE_URL =", API_BASE_URL);
+
 const SCREEN_W = Dimensions.get("window").width;
 
 /** -----------------------------
