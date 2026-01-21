@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -18,12 +18,12 @@ import {
   Dimensions,
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
-
 import Constants from "expo-constants";
 
-
+/** -----------------------------
+ *  API BASE URL (auto IP via Expo host)
+ *  ----------------------------- */
 function getHost() {
- 
   const hostFromExpo =
     Constants.expoConfig?.hostUri?.split(":")[0] ||
     Constants.manifest2?.extra?.expoClient?.hostUri?.split(":")[0] ||
@@ -31,14 +31,13 @@ function getHost() {
 
   if (hostFromExpo) return hostFromExpo;
 
-  
+  // Android emulator special case
   if (Platform.OS === "android") return "10.0.2.2";
 
   return "localhost";
 }
 
 export const API_BASE_URL = `http://${getHost()}:8000`;
-
 console.log("API_BASE_URL =", API_BASE_URL);
 
 const SCREEN_W = Dimensions.get("window").width;
@@ -50,20 +49,23 @@ async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const text = await res.text();
   let data = null;
+
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
     data = text;
   }
+
   if (!res.ok) {
     const msg =
-        (data && (data.detail || data.message)) ||
-        (typeof data === "string" ? data : null) ||
-        `HTTP ${res.status}`;
+      (data && (data.detail || data.message)) ||
+      (typeof data === "string" ? data : null) ||
+      `HTTP ${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
     throw err;
   }
+
   return data;
 }
 
@@ -108,7 +110,7 @@ function useApi() {
  *  App Screens (no navigation lib)
  *  ----------------------------- */
 export default function App() {
-  const { tokens, setTokens, authedFetch } = useApi();
+  const { setTokens, authedFetch } = useApi();
 
   // "screens": login → signup → categories → categoryMap → poiDetails
   const [route, setRoute] = useState({ name: "login", params: {} });
@@ -120,52 +122,59 @@ export default function App() {
   };
 
   return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: "#0b1523" }}>
-        {route.name === "login" && (
-            <LoginScreen
-                onLogin={(t) => {
-                  setTokens(t);
-                  go("categories");
-                }}
-                goSignup={() => go("signup")}
-            />
-        )}
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0b1523" }}>
+      {route.name === "login" && (
+        <LoginScreen
+          onLogin={(t) => {
+            setTokens(t);
+            go("categories");
+          }}
+          goSignup={() => go("signup")}
+        />
+      )}
 
-        {route.name === "signup" && (
-            <SignupScreen
-                onSignup={() => {
-                  Alert.alert("Έτοιμο!", "Ο λογαριασμός δημιουργήθηκε. Κάνε σύνδεση.");
-                  go("login");
-                }}
-                goLogin={() => go("login")}
-            />
-        )}
+      {route.name === "signup" && (
+        <SignupScreen
+          onSignup={() => {
+            Alert.alert("Έτοιμο!", "Ο λογαριασμός δημιουργήθηκε. Κάνε σύνδεση.");
+            go("login");
+          }}
+          goLogin={() => go("login")}
+        />
+      )}
 
-        {route.name === "categories" && (
-            <CategoriesScreen
-                authedFetch={authedFetch}
-                onOpenCategory={(category) => go("categoryMap", { category })}
-                onLogout={logout}
-            />
-        )}
+      {route.name === "categories" && (
+        <CategoriesScreen
+          authedFetch={authedFetch}
+          onOpenCategory={(category) => go("categoryMap", { category })}
+          onLogout={logout}
+        />
+      )}
 
-        {route.name === "categoryMap" && (
-            <CategoryMapScreen
-                authedFetch={authedFetch}
-                category={route.params.category}
-                onBack={() => go("categories")}
-                onOpenPoi={(poi) => go("poiDetails", { poiId: poi.id })}
-            />
-        )}
+      {route.name === "categoryMap" && (
+        <CategoryMapScreen
+          authedFetch={authedFetch}
+          category={route.params?.category}
+          onBack={() => go("categories")}
+          // ✅ IMPORTANT: pass category to poiDetails so Back works reliably
+          onOpenPoi={(poi) =>
+            go("poiDetails", {
+              poiId: poi?.id,
+              category: route.params?.category,
+            })
+          }
+        />
+      )}
 
-        {route.name === "poiDetails" && (
-            <PoiDetailsScreen
-                authedFetch={authedFetch}
-                poiId={route.params.poiId}
-                onBack={() => go("categoryMap", route.params)}
-            />
-        )}
-      </SafeAreaView>
+      {route.name === "poiDetails" && (
+        <PoiDetailsScreen
+          authedFetch={authedFetch}
+          poiId={route.params?.poiId}
+          // ✅ IMPORTANT: go back to categoryMap with category (not route.params as-is)
+          onBack={() => go("categoryMap", { category: route.params?.category })}
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
@@ -181,8 +190,8 @@ function LoginScreen({ onLogin, goSignup }) {
   const [about, setAbout] = useState([]);
   useEffect(() => {
     fetchJson(`${API_BASE_URL}/about`)
-        .then(setAbout)
-        .catch(() => {});
+      .then(setAbout)
+      .catch(() => {});
   }, []);
 
   const emailOk = useMemo(() => /^\S+@\S+\.\S+$/.test(email.trim()), [email]);
@@ -205,66 +214,70 @@ function LoginScreen({ onLogin, goSignup }) {
   };
 
   return (
-      <ImageBackground
-          source={require("./assets/splash-icon.png")}
-          style={styles.bg}
-          resizeMode="cover"
+    <ImageBackground
+      source={require("./assets/splash-icon.png")}
+      style={styles.bg}
+      resizeMode="cover"
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.centerWrap}
       >
-        <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.centerWrap}
-        >
-          <View style={styles.card}>
-            <Text style={styles.title}>Ioannina Explorer</Text>
-            <Text style={styles.subtitle}>Σύνδεση</Text>
+        <View style={styles.card}>
+          <Text style={styles.title}>Ioannina Explorer</Text>
+          <Text style={styles.subtitle}>Σύνδεση</Text>
 
-            <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="rgba(255,255,255,0.7)"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-            />
-            <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="rgba(255,255,255,0.7)"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-            />
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
 
-            <TouchableOpacity
-                style={[styles.btn, (!emailOk || !passOk || loading) && styles.btnDisabled]}
-                disabled={!emailOk || !passOk || loading}
-                onPress={doLogin}
-            >
-              {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Sign In</Text>}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.linkBtn} onPress={goSignup}>
-              <Text style={styles.linkText}>Δεν έχεις λογαριασμό; Φτιάξε έναν</Text>
-            </TouchableOpacity>
-
-            {about?.length > 0 && (
-                <View style={styles.aboutBox}>
-                  <Text style={styles.aboutTitle}>Ομάδα</Text>
-                  {about.map((m, idx) => (
-                      <Text key={idx} style={styles.aboutLine}>
-                        • {m.name} ({m.am})
-                      </Text>
-                  ))}
-                </View>
+          <TouchableOpacity
+            style={[styles.btn, (!emailOk || !passOk || loading) && styles.btnDisabled]}
+            disabled={!emailOk || !passOk || loading}
+            onPress={doLogin}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.btnText}>Sign In</Text>
             )}
+          </TouchableOpacity>
 
-            <Text style={styles.hint}>
-              Tip: Αν είσαι σε κινητό, άλλαξε το API_BASE_URL στο πάνω μέρος.
-            </Text>
-          </View>
-        </KeyboardAvoidingView>
-      </ImageBackground>
+          <TouchableOpacity style={styles.linkBtn} onPress={goSignup}>
+            <Text style={styles.linkText}>Δεν έχεις λογαριασμό; Φτιάξε έναν</Text>
+          </TouchableOpacity>
+
+          {about?.length > 0 && (
+            <View style={styles.aboutBox}>
+              <Text style={styles.aboutTitle}>Ομάδα</Text>
+              {about.map((m, idx) => (
+                <Text key={idx} style={styles.aboutLine}>
+                  • {m.name} ({m.am})
+                </Text>
+              ))}
+            </View>
+          )}
+
+          <Text style={styles.hint}>
+            Tip: Το API_BASE_URL γίνεται αυτόματα από Expo host (χωρίς hardcoded IP).
+          </Text>
+        </View>
+      </KeyboardAvoidingView>
+    </ImageBackground>
   );
 }
 
@@ -298,59 +311,63 @@ function SignupScreen({ onSignup, goLogin }) {
   };
 
   return (
-      <ImageBackground
-          source={require("./assets/splash-icon.png")}
-          style={styles.bg}
-          resizeMode="cover"
+    <ImageBackground
+      source={require("./assets/splash-icon.png")}
+      style={styles.bg}
+      resizeMode="cover"
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.centerWrap}
       >
-        <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.centerWrap}
-        >
-          <View style={styles.card}>
-            <Text style={styles.title}>Ioannina Explorer</Text>
-            <Text style={styles.subtitle}>Δημιουργία λογαριασμού</Text>
+        <View style={styles.card}>
+          <Text style={styles.title}>Ioannina Explorer</Text>
+          <Text style={styles.subtitle}>Δημιουργία λογαριασμού</Text>
 
-            <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="rgba(255,255,255,0.7)"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-            />
-            <TextInput
-                style={styles.input}
-                placeholder="Password (min 6)"
-                placeholderTextColor="rgba(255,255,255,0.7)"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-            />
-            <TextInput
-                style={styles.input}
-                placeholder="Repeat password"
-                placeholderTextColor="rgba(255,255,255,0.7)"
-                value={password2}
-                onChangeText={setPassword2}
-                secureTextEntry
-            />
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Password (min 6)"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Repeat password"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={password2}
+            onChangeText={setPassword2}
+            secureTextEntry
+          />
 
-            <TouchableOpacity
-                style={[styles.btn, (!emailOk || !passOk || !matchOk || loading) && styles.btnDisabled]}
-                disabled={!emailOk || !passOk || !matchOk || loading}
-                onPress={doSignup}
-            >
-              {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Create Account</Text>}
-            </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btn, (!emailOk || !passOk || !matchOk || loading) && styles.btnDisabled]}
+            disabled={!emailOk || !passOk || !matchOk || loading}
+            onPress={doSignup}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.btnText}>Create Account</Text>
+            )}
+          </TouchableOpacity>
 
-            <TouchableOpacity style={styles.linkBtn} onPress={goLogin}>
-              <Text style={styles.linkText}>Έχεις ήδη λογαριασμό; Σύνδεση</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </ImageBackground>
+          <TouchableOpacity style={styles.linkBtn} onPress={goLogin}>
+            <Text style={styles.linkText}>Έχεις ήδη λογαριασμό; Σύνδεση</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </ImageBackground>
   );
 }
 
@@ -367,7 +384,8 @@ function CategoriesScreen({ authedFetch, onOpenCategory, onLogout }) {
       try {
         setLoading(true);
         const data = await authedFetch("/pois/categories");
-        if (mounted) setCats(data || []);
+        const clean = (data || []).filter((c) => c && c.id);
+        if (mounted) setCats(clean);
       } catch (e) {
         Alert.alert("Σφάλμα", e.message);
       } finally {
@@ -378,42 +396,49 @@ function CategoriesScreen({ authedFetch, onOpenCategory, onLogout }) {
   }, [authedFetch]);
 
   return (
-      <View style={styles.screen}>
-        <Header title="Κατηγορίες POIs (Ιωάννινα)" rightText="Logout" onRightPress={onLogout} />
-        {loading ? (
-            <View style={styles.center}>
-              <ActivityIndicator />
-              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
-            </View>
-        ) : (
-            <FlatList
-                data={cats}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
-                renderItem={({ item }) => (
-                    <TouchableOpacity style={styles.catCard} onPress={() => onOpenCategory(item)}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.catTitle}>{item.name}</Text>
-                        <Text style={styles.catSub}>{item.count} σημεία ενδιαφέροντος</Text>
-                      </View>
-                      <Text style={styles.catArrow}>›</Text>
-                    </TouchableOpacity>
-                )}
-            />
-        )}
-        <Text style={styles.footerNote}>
-          ⚠️ Για χάρτη: τρέξε{" "}
-          <Text style={{ fontWeight: "800" }}>npx expo install react-native-maps</Text>
-        </Text>
-      </View>
+    <View style={styles.screen}>
+      <Header title="Κατηγορίες POIs (Ιωάννινα)" rightText="Logout" onRightPress={onLogout} />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={cats}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.catCard} onPress={() => onOpenCategory(item)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.catTitle}>{item.name}</Text>
+                <Text style={styles.catSub}>{item.count} σημεία ενδιαφέροντος</Text>
+              </View>
+              <Text style={styles.catArrow}>›</Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
   );
 }
 
 /** -----------------------------
  *  CATEGORY MAP SCREEN (/pois/categories/{id})
- *  Full-screen map + pins + tooltip preview
  *  ----------------------------- */
 function CategoryMapScreen({ authedFetch, category, onBack, onOpenPoi }) {
+  // ✅ guard: if category missing, show message instead of crashing
+  if (!category?.id) {
+    return (
+      <View style={styles.screen}>
+        <Header title="Κατηγορία" leftText="‹ Back" onLeftPress={onBack} />
+        <View style={styles.center}>
+          <Text style={{ color: "white" }}>Δεν βρέθηκε κατηγορία. Γύρνα πίσω.</Text>
+        </View>
+      </View>
+    );
+  }
+
   const [loading, setLoading] = useState(true);
   const [pois, setPois] = useState([]);
 
@@ -423,7 +448,8 @@ function CategoryMapScreen({ authedFetch, category, onBack, onOpenPoi }) {
       try {
         setLoading(true);
         const data = await authedFetch(`/pois/categories/${category.id}`);
-        if (mounted) setPois(data || []);
+        const clean = (data || []).filter((p) => p && p.id);
+        if (mounted) setPois(clean);
       } catch (e) {
         Alert.alert("Σφάλμα", e.message);
       } finally {
@@ -431,10 +457,12 @@ function CategoryMapScreen({ authedFetch, category, onBack, onOpenPoi }) {
       }
     })();
     return () => (mounted = false);
-  }, [authedFetch, category?.id]);
+  }, [authedFetch, category.id]);
 
   const region = useMemo(() => {
-    const withCoords = (pois || []).filter((p) => typeof p.lat === "number" && typeof p.lon === "number");
+    const withCoords = (pois || []).filter(
+      (p) => typeof p.lat === "number" && typeof p.lon === "number"
+    );
     if (withCoords.length === 0) {
       // Ioannina center fallback
       return { latitude: 39.665, longitude: 20.853, latitudeDelta: 0.18, longitudeDelta: 0.18 };
@@ -451,43 +479,42 @@ function CategoryMapScreen({ authedFetch, category, onBack, onOpenPoi }) {
   }, [pois]);
 
   return (
-      <View style={styles.screen}>
-        <Header title={category?.name || "Κατηγορία"} leftText="‹ Back" onLeftPress={onBack} />
-        {loading ? (
-            <View style={styles.center}>
-              <ActivityIndicator />
-              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση POIs...</Text>
-            </View>
-        ) : (
-            <MapView style={{ flex: 1 }} initialRegion={region}>
-              {(pois || [])
-                  .filter((p) => typeof p.lat === "number" && typeof p.lon === "number")
-                  .map((p) => (
-                      <Marker key={p.id} coordinate={{ latitude: p.lat, longitude: p.lon }}>
-                        <Callout onPress={() => onOpenPoi(p)}>
-                          <View style={{ width: 220 }}>
-                            <Text style={{ fontWeight: "800", marginBottom: 4 }}>{p.title || p.id}</Text>
-                            {p.description ? (
-                                <Text numberOfLines={3} style={{ color: "#333" }}>
-                                  {p.description}
-                                </Text>
-                            ) : null}
-                            <Text style={{ marginTop: 8, color: "#1d4ed8", fontWeight: "700" }}>
-                              Άνοιγμα λεπτομερειών →
-                            </Text>
-                          </View>
-                        </Callout>
-                      </Marker>
-                  ))}
-            </MapView>
-        )}
-      </View>
+    <View style={styles.screen}>
+      <Header title={category?.name || "Κατηγορία"} leftText="‹ Back" onLeftPress={onBack} />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση POIs...</Text>
+        </View>
+      ) : (
+        <MapView style={{ flex: 1 }} initialRegion={region}>
+          {(pois || [])
+            .filter((p) => p?.id && typeof p.lat === "number" && typeof p.lon === "number")
+            .map((p) => (
+              <Marker key={String(p.id)} coordinate={{ latitude: p.lat, longitude: p.lon }}>
+                <Callout onPress={() => onOpenPoi(p)}>
+                  <View style={{ width: 220 }}>
+                    <Text style={{ fontWeight: "800", marginBottom: 4 }}>{p.title || p.id}</Text>
+                    {p.description ? (
+                      <Text numberOfLines={3} style={{ color: "#333" }}>
+                        {p.description}
+                      </Text>
+                    ) : null}
+                    <Text style={{ marginTop: 8, color: "#1d4ed8", fontWeight: "700" }}>
+                      Άνοιγμα λεπτομερειών →
+                    </Text>
+                  </View>
+                </Callout>
+              </Marker>
+            ))}
+        </MapView>
+      )}
+    </View>
   );
 }
 
 /** -----------------------------
  *  POI DETAILS SCREEN (/pois/{id})
- *  Slider >=3 photos + tag + coords + wikipedia link + extra text
  *  ----------------------------- */
 function PoiDetailsScreen({ authedFetch, poiId, onBack }) {
   const [loading, setLoading] = useState(true);
@@ -513,7 +540,6 @@ function PoiDetailsScreen({ authedFetch, poiId, onBack }) {
     const list = [];
     if (poi?.image) list.push(poi.image);
     if (Array.isArray(poi?.images)) list.push(...poi.images);
-    // unique + keep first 6
     return Array.from(new Set(list)).slice(0, 6);
   }, [poi]);
 
@@ -524,53 +550,57 @@ function PoiDetailsScreen({ authedFetch, poiId, onBack }) {
   };
 
   return (
-      <View style={styles.screen}>
-        <Header title="Λεπτομέρειες POI" leftText="‹ Back" onLeftPress={onBack} />
-        {loading ? (
-            <View style={styles.center}>
-              <ActivityIndicator />
-              <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
+    <View style={styles.screen}>
+      <Header title="Λεπτομέρειες POI" leftText="‹ Back" onLeftPress={onBack} />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 10, color: "white" }}>Φόρτωση...</Text>
+        </View>
+      ) : !poi ? (
+        <View style={styles.center}>
+          <Text style={{ color: "white" }}>Δεν βρέθηκε POI.</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+          <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.slider}>
+            {(images.length >= 3 ? images : [...images, ...images, ...images].slice(0, 3)).map((u, idx) => (
+              <Image key={idx} source={{ uri: u }} style={styles.slideImg} />
+            ))}
+          </ScrollView>
+
+          <View style={{ padding: 16 }}>
+            {!!poi.categoryName && <Text style={styles.tag}>{poi.categoryName}</Text>}
+            <Text style={styles.poiTitle}>{poi.title || poi.id}</Text>
+            {!!poi.description && <Text style={styles.poiDesc}>{poi.description}</Text>}
+
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Συντεταγμένες:</Text>
+              <Text style={styles.metaVal}>
+                {typeof poi.lat === "number" && typeof poi.lon === "number"
+                  ? `${poi.lat.toFixed(6)}, ${poi.lon.toFixed(6)}`
+                  : "—"}
+              </Text>
             </View>
-        ) : !poi ? (
-            <View style={styles.center}>
-              <Text style={{ color: "white" }}>Δεν βρέθηκε POI.</Text>
-            </View>
-        ) : (
-            <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
-              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.slider}>
-                {(images.length >= 3 ? images : [...images, ...images, ...images].slice(0, 3)).map((u, idx) => (
-                    <Image key={idx} source={{ uri: u }} style={styles.slideImg} />
-                ))}
-              </ScrollView>
 
-              <View style={{ padding: 16 }}>
-                {!!poi.categoryName && <Text style={styles.tag}>{poi.categoryName}</Text>}
-                <Text style={styles.poiTitle}>{poi.title || poi.id}</Text>
-                {!!poi.description && <Text style={styles.poiDesc}>{poi.description}</Text>}
+            <TouchableOpacity
+              style={[styles.wikiBtn, !poi.wikipediaUrl && { opacity: 0.5 }]}
+              disabled={!poi.wikipediaUrl}
+              onPress={openWikipedia}
+            >
+              <Text style={styles.wikiText}>Άνοιγμα στη Wikipedia</Text>
+            </TouchableOpacity>
 
-                <View style={styles.metaRow}>
-                  <Text style={styles.metaLabel}>Συντεταγμένες:</Text>
-                  <Text style={styles.metaVal}>
-                    {typeof poi.lat === "number" && typeof poi.lon === "number"
-                        ? `${poi.lat.toFixed(6)}, ${poi.lon.toFixed(6)}`
-                        : "—"}
-                  </Text>
-                </View>
-
-                <TouchableOpacity style={[styles.wikiBtn, !poi.wikipediaUrl && { opacity: 0.5 }]} disabled={!poi.wikipediaUrl} onPress={openWikipedia}>
-                  <Text style={styles.wikiText}>Άνοιγμα στη Wikipedia</Text>
-                </TouchableOpacity>
-
-                {!!poi.extraText && (
-                    <View style={styles.longBox}>
-                      <Text style={styles.longTitle}>Περισσότερα</Text>
-                      <Text style={styles.longText}>{poi.extraText}</Text>
-                    </View>
-                )}
+            {!!poi.extraText && (
+              <View style={styles.longBox}>
+                <Text style={styles.longTitle}>Περισσότερα</Text>
+                <Text style={styles.longText}>{poi.extraText}</Text>
               </View>
-            </ScrollView>
-        )}
-      </View>
+            )}
+          </View>
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -579,19 +609,19 @@ function PoiDetailsScreen({ authedFetch, poiId, onBack }) {
  *  ----------------------------- */
 function Header({ title, leftText, onLeftPress, rightText, onRightPress }) {
   return (
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onLeftPress} disabled={!onLeftPress} style={styles.headerBtn}>
-          <Text style={[styles.headerBtnText, !onLeftPress && { opacity: 0 }]}>{leftText || " "}</Text>
-        </TouchableOpacity>
+    <View style={styles.header}>
+      <TouchableOpacity onPress={onLeftPress} disabled={!onLeftPress} style={styles.headerBtn}>
+        <Text style={[styles.headerBtnText, !onLeftPress && { opacity: 0 }]}>{leftText || " "}</Text>
+      </TouchableOpacity>
 
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {title}
-        </Text>
+      <Text style={styles.headerTitle} numberOfLines={1}>
+        {title}
+      </Text>
 
-        <TouchableOpacity onPress={onRightPress} disabled={!onRightPress} style={styles.headerBtn}>
-          <Text style={[styles.headerBtnText, !onRightPress && { opacity: 0 }]}>{rightText || " "}</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity onPress={onRightPress} disabled={!onRightPress} style={styles.headerBtn}>
+        <Text style={[styles.headerBtnText, !onRightPress && { opacity: 0 }]}>{rightText || " "}</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -673,16 +703,6 @@ const styles = StyleSheet.create({
   catTitle: { color: "white", fontSize: 16, fontWeight: "900" },
   catSub: { color: "rgba(255,255,255,0.75)", marginTop: 4 },
   catArrow: { color: "white", fontSize: 26, paddingHorizontal: 8, opacity: 0.9 },
-
-  footerNote: {
-    textAlign: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.08)",
-  },
 
   slider: { width: "100%", height: 240, backgroundColor: "#000" },
   slideImg: { width: SCREEN_W, height: 240, resizeMode: "cover" },
